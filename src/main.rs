@@ -23,7 +23,7 @@ fn main() {
     let reader = io::BufReader::new(file);
     let problem = transform::parse(reader).unwrap();
 
-    let mut adt_flattener = ADTFlattener::default();
-    adt_flattener.load(problem);
-    adt_flattener.flatten(problem);
+    let problem = ADTFlattener::default().flatten(problem);
+    println!("; Auto-generated flattened instance without ADTs.");
+    println!("{}", problem.to_string());
 }

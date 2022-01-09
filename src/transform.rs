@@ -1,6 +1,8 @@
 use amzn_smt_ir::{logic::*, Command as IRCommand, ParseError, Script, Term as IRTerm};
-use amzn_smt_ir::{ICoreOp, ISort, ISymbol, IVar, QualIdentifier};
+use amzn_smt_ir::{ICoreOp, ISort, ISymbol, IVar, QualIdentifier, Identifier};
 use amzn_smt_ir::visit::{ControlFlow, Visit, Visitor, SuperVisit};
+use amzn_smt_ir::Term::Quantifier;
+use amzn_smt_ir::Quantifier::Forall;
 
 use num_traits::identities::Zero;
 use std::collections::HashMap;
@@ -14,20 +16,37 @@ type Command = IRCommand<Term>;
 ///
 pub fn parse(
     smtlib: impl std::io::BufRead,
-) -> Result<impl Iterator<Item = Command>, ParseError<ALL>> {
-    Ok(Script::<Term>::parse(smtlib)?.into_iter())
+) -> Result<Script<Term>, ParseError<ALL>> {
+    Ok(Script::<Term>::parse(smtlib)?)
 }
 
 #[derive(Default, Clone, Debug)]
 pub struct ADTFlattener {
+    // datatype_sort -> member_sort -> sort
     datatypes: HashMap<ISymbol, HashMap<ISymbol, ISort>>,
+    // variable name -> sort
+    var_sorts: HashMap<ISymbol, ISort>,
+    local_var_sorts: HashMap<ISymbol, ISort>,
 }
 
 impl Visitor<ALL> for ADTFlattener {
     type BreakTy = ();
 
     fn visit_var(&mut self, var: &IVar<QualIdentifier>) -> ControlFlow<Self::BreakTy> {
-        println!("{}", var.sym());
+        if let QualIdentifier::Simple { identifier } = var.as_ref() {
+            let id_symbol = match identifier.as_ref() {
+                Identifier::Simple { symbol } => symbol,
+                Identifier::Indexed { symbol, .. } => symbol
+            };
+            match self.var_sorts.get(id_symbol) {
+                Some(sort) => {
+                    println!("Variable {} has sort {}", identifier, sort.sym())
+                }
+                None => {
+                    println!("Variable {} has no sort", identifier)
+                }
+            }
+        }
         ControlFlow::CONTINUE
     }
 
@@ -37,8 +56,8 @@ impl Visitor<ALL> for ADTFlattener {
 }
 
 impl ADTFlattener {
-    pub fn load<'a>(&mut self, commands: impl Iterator<Item = &'a Command>) {
-        commands.for_each(|c| {
+    pub fn collect_datatypes(&mut self, commands: &Script<Term>) {
+        commands.as_ref().iter().for_each(|c| {
             if let Command::DeclareDatatypes { datatypes } = c {
                 datatypes
                     .iter()
@@ -59,12 +78,37 @@ impl ADTFlattener {
         println!("{:?}", self.datatypes);
     }
 
-    pub fn flatten(&mut self, commands: impl Iterator<Item = Command>) {
-        commands.for_each(|c| {
+    pub fn collect_var_sorts(&mut self, commands: &Script<Term>) {
+        commands.as_ref().iter().for_each(|c| {
+            if let Command::DeclareConst { symbol, sort } = c {
+                self.var_sorts.insert(symbol.clone(), sort.clone());
+            }
+        });
+
+        println!("{:?}", self.var_sorts);
+    }
+
+    pub fn collect_quant_var_sorts(&mut self, commands: &Script<Term>) {
+        commands.as_ref().iter().for_each(|c| {
             if let Command::Assert { term } = c {
-                term.visit_with(self);
+                println!("{:?}", term);
+                if let Quantifier(quantifier) = term.clone() {
+                    if let Forall(vars, ..) = quantifier.as_ref() {
+                        vars.into_iter().for_each(|(symbol, sort)| {
+                            self.local_var_sorts.insert(symbol.clone(), sort.clone());
+                        })
+                    }
+                }
+                let flow = term.visit_with(self);
+                assert!(flow == ControlFlow::CONTINUE);
             }
         });
     }
-}
 
+    pub fn flatten(&mut self, commands: Script<Term>) -> Script<Term> {
+        self.collect_datatypes(&commands);
+        self.collect_var_sorts(&commands);
+        self.collect_quant_var_sorts(&commands);
+        commands
+    }
+}
