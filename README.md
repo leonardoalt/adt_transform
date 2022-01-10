@@ -12,7 +12,7 @@ separate variables in the context where they are used.
 
 This implies that:
 
-1) A variable of tuple type is transformed into one or more variables
+1) A **variable of tuple type** is transformed into one or more variables
 representing each tuple member.
 
 ```
@@ -27,9 +27,9 @@ representing each tuple member.
 
 The same is valid for variable declarations inside quantifiers.
 
-2) A tuple constructor transformation needs to take its context into account.
+2) A **tuple constructor** transformation needs to take its context into account.
 
-2.1) If it is used in an equality, we need a new equality for each member.
+- 2.1) If it is used in an **equality**, we need a new equality for each member.
 
 ```
 (declare-datatypes ((|my_tuple| 0)) (((|my_tuple| (|member1| (Array Int Int)) (|member2| Int) ))))
@@ -51,8 +51,8 @@ The same is valid for variable declarations inside quantifiers.
 ))
 ```
 
-2.2) If it is used in a function application, we just apply the function on the
-new variables instead.
+- 2.2) If it is used in a **function application**, we just apply the function
+  on the new variables instead.
 
 ```
 (declare-datatypes ((|my_tuple| 0)) (((|my_tuple| (|member1| (Array Int Int)) (|member2| Int) ))))
@@ -74,8 +74,8 @@ new variables instead.
 (assert (f a i))
 ```
 
-2.3) A tuple accessor transformation simply uses the new variable created for
-that member.
+- 2.3) A **tuple accessor** transformation simply uses the new variable created
+  for that member.
 
 ```
 (declare-datatypes ((|my_tuple| 0)) (((|my_tuple| (|member1| (Array Int Int)) (|member2| Int) ))))
@@ -91,11 +91,20 @@ that member.
 (assert (> t_member2 0))
 ```
 
-3) Functions that take tuples as parameters may now increase their arity, as
+3) **Functions** that take tuples as parameters may now increase their arity, as
 shown in 2.2 above.
 
-4) Recursive tuples are flattened in consecutive stages until there are no more
+4) **Nested tuples** are flattened in consecutive stages until there are no more
 tuples left.
+
+Unsupported Syntax
+------------------
+
+- Accessor functions must be applied to a variable of a tuple sort or another
+  accessor function (in case of nested tuples). If they are applied over
+  another function application or tuple constructor, neither will be flattened.
+- Tuples inside `let` and `match` expressions.
+- Tuples as array index (see below).
 
 Tuples as Index Sort of Arrays
 ------------------------------
