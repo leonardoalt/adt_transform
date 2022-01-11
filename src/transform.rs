@@ -22,6 +22,7 @@ pub struct ADTFlattener {
     datatypes: HashMap<ISymbol, Vec<(ISymbol, ISymbol, ISort)>>,
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
+    local_var_sorts: HashMap<ISymbol, ISort>,
 }
 
 impl ADTFlattener {
@@ -42,31 +43,16 @@ impl ADTFlattener {
     }
 
     fn var_sort(&self, var: &IVar<QualIdentifier>) -> ISort {
-        self.var_sorts.get(&var_symbol(var)).unwrap().clone()
+        match self.var_sorts.get(&var_symbol(var)) {
+            Some(s) => s.clone(),
+            None => self.local_var_sorts.get(&var_symbol(var)).unwrap().clone(),
+        }
     }
 
     fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
-        //let quant_vars = self.collect_quant_var_sorts(&assertion);
+        self.collect_quant_vars(&assertion);
 
-        /*
-        if let Quantifier(ref quantifier) = assertion {
-            if let Forall(vars, term) = quantifier.as_ref() {
-                let assertion = Forall(vars.to_vec(), term);
-            } else if let Exists(vars, term) = quantifier.as_ref() {
-                let assertion = Exists(vars.to_vec(), term);
-            }
-        }
-        */
-
-        /*
-        let assertion = match assertion {
-            Quantifier(quantifier) => Quantifier(IQuantifier(match quantifier.as_ref() {
-                Forall(vars, term) => Forall(self.flatten_var_decls(vars.to_vec()), term),
-                Exists(vars, term) => Exists(self.flatten_var_decls(vars.to_vec()), term)
-            })),
-            _ => assertion
-        };
-        */
+        let assertion = self.flatten_quant_vars(assertion);
 
         let t = assertion.fold_with(self);
         IRCommand::Assert { term: t.unwrap() }
@@ -107,6 +93,19 @@ impl ADTFlattener {
         });
     }
 
+    fn collect_quant_vars(&mut self, assertion: &Term) {
+        self.local_var_sorts = match assertion {
+            Quantifier(ref quantifier) => match quantifier.as_ref() {
+                Forall(vars, ..) | Exists(vars, ..) => vars
+                    .clone()
+                    .into_iter()
+                    .map(|(symbol, sort)| (symbol, sort))
+                    .collect::<HashMap<ISymbol, ISort>>(),
+            },
+            _ => HashMap::new(),
+        };
+    }
+
     fn flatten_sort(&mut self, sort: ISort) -> Vec<ISort> {
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
@@ -130,6 +129,35 @@ impl ADTFlattener {
                 })
                 .collect::<Vec<(ISymbol, ISort)>>(),
             None => vec![(name, sort)],
+        }
+    }
+
+    fn flatten_quant_vars(&mut self, assertion: Term) -> Term {
+        // TODO can we clone less stuff here?
+        match assertion {
+            Quantifier(ref quantifier) => match quantifier.as_ref() {
+                Forall(vars, term) => Term::from(Forall(
+                    vars.clone()
+                        .into_iter()
+                        .map(|var| self.flatten_var_decl(var))
+                        .collect::<Vec<Vec<(ISymbol, ISort)>>>()
+                        .into_iter()
+                        .flatten()
+                        .collect(),
+                    term.clone(),
+                )),
+                Exists(vars, term) => Term::from(Exists(
+                    vars.clone()
+                        .into_iter()
+                        .map(|var| self.flatten_var_decl(var))
+                        .collect::<Vec<Vec<(ISymbol, ISort)>>>()
+                        .into_iter()
+                        .flatten()
+                        .collect(),
+                    term.clone(),
+                )),
+            },
+            _ => assertion,
         }
     }
 
@@ -190,7 +218,6 @@ impl ADTFlattener {
                 .collect(),
         )
     }
-
 }
 
 impl Folder<ALL> for ADTFlattener {
@@ -206,7 +233,7 @@ impl Folder<ALL> for ADTFlattener {
                     let dt_info = dt.iter().find(|(name, _, _)| name == &uf.as_ref().func);
                     assert!(dt_info.is_some());
                     let new_name =
-                        ISymbol::from(format!("{}_{}", dt_info.unwrap().0, var_symbol(var)));
+                        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1));
                     return Ok(Term::from(IVar::from(QualIdentifier::from(new_name))));
                 }
             }
