@@ -8,7 +8,7 @@ use amzn_smt_ir::{logic::*, Command as IRCommand, Script, Term as IRTerm};
 use amzn_smt_ir::{IConst, ICoreOp, ILet, IMatch, IQuantifier, IUF};
 use amzn_smt_ir::{IOp, ISort, ISymbol, IVar, QualIdentifier};
 
-use smt2parser::concrete::Command::DeclareConst;
+use smt2parser::concrete::Command::{DeclareConst, DeclareFun};
 
 use num_traits::identities::Zero;
 use std::collections::HashMap;
@@ -18,8 +18,8 @@ type Command = IRCommand<Term>;
 
 #[derive(Default, Clone, Debug)]
 pub struct ADTFlattener {
-    // datatype_sort -> member_sort -> (template name, sort)
-    datatypes: HashMap<ISymbol, HashMap<ISymbol, (ISymbol, ISort)>>,
+    // datatype_sort -> (member name, template name, member sort)
+    datatypes: HashMap<ISymbol, Vec<(ISymbol, ISymbol, ISort)>>,
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
 }
@@ -32,12 +32,41 @@ impl ADTFlattener {
 
         let commands = self.remove_declare_datatypes(commands);
         let commands = self.flatten_all_declare_const(commands);
+        let commands = self.flatten_all_declare_fun(commands);
 
         // Flatten each assertion separately.
         commands.map(|cmd| match cmd {
             IRCommand::Assert { term } => self.flatten_assertion(term),
             _ => cmd,
         })
+    }
+
+    fn flatten_declare_fun(&mut self, declare_fun: IRCommand<Term>) -> IRCommand<Term> {
+        match declare_fun {
+            DeclareFun {
+                symbol,
+                parameters,
+                sort,
+            } => DeclareFun {
+                symbol,
+                parameters: parameters
+                    .into_iter()
+                    .map(|sort| self.flatten_sort(sort))
+                    .flatten()
+                    .collect(),
+                sort,
+            },
+            _ => declare_fun,
+        }
+    }
+
+    fn flatten_all_declare_fun(&mut self, commands: Script<Term>) -> Script<Term> {
+        Script::from_commands(
+            commands
+                .into_iter()
+                .map(|cmd| self.flatten_declare_fun(cmd))
+                .collect(),
+        )
     }
 
     fn var_sort(&self, var: &IVar<QualIdentifier>) -> ISort {
@@ -87,10 +116,11 @@ impl ADTFlattener {
                             .map(|(member, sort)| {
                                 (
                                     member.clone(),
-                                    (ISymbol::from(format!("{}_{}", symbol, member)), sort),
+                                    ISymbol::from(format!("{}_{}", symbol, member)),
+                                    sort,
                                 )
                             })
-                            .collect::<HashMap<ISymbol, (ISymbol, ISort)>>();
+                            .collect();
                         self.datatypes.insert(symbol.clone(), members);
                     })
             }
@@ -105,11 +135,22 @@ impl ADTFlattener {
         });
     }
 
+    fn flatten_sort(&mut self, sort: ISort) -> Vec<ISort> {
+        match self.datatypes.get(sort.sym()) {
+            Some(members) => members
+                .clone()
+                .into_iter()
+                .map(|(_, _, sort)| sort)
+                .collect(),
+            None => vec![sort],
+        }
+    }
+
     fn flatten_var_decl(&mut self, (name, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
                 .iter()
-                .map(|(_, (template_name, sort))| {
+                .map(|(_, template_name, sort)| {
                     (
                         ISymbol::from(format!("{}_{}", name, template_name)),
                         sort.clone(),
@@ -161,7 +202,7 @@ impl Folder<ALL> for ADTFlattener {
             if let Term::Variable(var) = &args[0] {
                 let sort = self.var_sort(var);
                 if let Some(dt) = self.datatypes.get(sort.sym()) {
-                    let dt_info = dt.get(&uf.as_ref().func);
+                    let dt_info = dt.iter().find(|(name, _, _)| name == &uf.as_ref().func);
                     assert!(dt_info.is_some());
                     let new_name =
                         ISymbol::from(format!("{}_{}", dt_info.unwrap().0, var_symbol(var)));

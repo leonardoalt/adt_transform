@@ -13,4 +13,3 @@ pub fn var_symbol(var: &IVar<QualIdentifier>) -> ISymbol {
         QualIdentifier::Sorted { identifier, .. } => identifier_symbol(identifier),
     }
 }
-
