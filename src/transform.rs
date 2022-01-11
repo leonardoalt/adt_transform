@@ -1,10 +1,12 @@
+use crate::helpers::*;
+
 use amzn_smt_ir::fold::{Fold, Folder, SuperFold};
 use amzn_smt_ir::Quantifier::Exists;
 use amzn_smt_ir::Quantifier::Forall;
 use amzn_smt_ir::Term::Quantifier;
-use amzn_smt_ir::{logic::*, Command as IRCommand, ParseError, Script, Term as IRTerm};
+use amzn_smt_ir::{logic::*, Command as IRCommand, Script, Term as IRTerm};
 use amzn_smt_ir::{IConst, ICoreOp, ILet, IMatch, IQuantifier, IUF};
-use amzn_smt_ir::{IIdentifier, IOp, ISort, ISymbol, IVar, Identifier, QualIdentifier};
+use amzn_smt_ir::{IOp, ISort, ISymbol, IVar, QualIdentifier};
 
 use smt2parser::concrete::Command::DeclareConst;
 
@@ -14,88 +16,12 @@ use std::collections::HashMap;
 type Term = IRTerm<ALL>;
 type Command = IRCommand<Term>;
 
-///
-/// Build an iterator from an input buffer. The input is parsed as a list of commands
-/// in SMT-LIB syntax.
-///
-pub fn parse(smtlib: impl std::io::BufRead) -> Result<Script<Term>, ParseError<ALL>> {
-    Script::<Term>::parse(smtlib)
-}
-
 #[derive(Default, Clone, Debug)]
 pub struct ADTFlattener {
     // datatype_sort -> member_sort -> (template name, sort)
     datatypes: HashMap<ISymbol, HashMap<ISymbol, (ISymbol, ISort)>>,
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
-}
-
-fn identifier_symbol(identifier: &IIdentifier) -> ISymbol {
-    match identifier.as_ref() {
-        Identifier::Simple { symbol } => symbol.clone(),
-        Identifier::Indexed { symbol, .. } => symbol.clone(),
-    }
-}
-
-fn var_symbol(var: &IVar<QualIdentifier>) -> ISymbol {
-    match var.as_ref() {
-        QualIdentifier::Simple { identifier } => identifier_symbol(identifier),
-        QualIdentifier::Sorted { identifier, .. } => identifier_symbol(identifier),
-    }
-}
-
-impl Folder<ALL> for ADTFlattener {
-    type Output = Term;
-    type Error = ();
-
-    fn fold_uninterpreted_func(&mut self, uf: IUF<ALL>) -> Result<Self::Output, Self::Error> {
-        let args = &uf.as_ref().args;
-        if args.len() == 1 {
-            if let Term::Variable(var) = &args[0] {
-                let sort = self.var_sort(var);
-                if let Some(dt) = self.datatypes.get(sort.sym()) {
-                    let dt_info = dt.get(&uf.as_ref().func);
-                    assert!(dt_info.is_some());
-                    let new_name =
-                        ISymbol::from(format!("{}_{}", dt_info.unwrap().0, var_symbol(var)));
-                    return Ok(Term::from(IVar::from(QualIdentifier::from(new_name))));
-                }
-            }
-        }
-
-        uf.super_fold_with(self).map(Into::into)
-    }
-
-    fn fold_const(&mut self, constant: IConst) -> Result<Self::Output, Self::Error> {
-        Ok(constant.into())
-    }
-
-    fn fold_var(&mut self, var: IVar<QualIdentifier>) -> Result<Self::Output, Self::Error> {
-        Ok(var.into())
-    }
-
-    fn fold_core_op(&mut self, op: ICoreOp<ALL>) -> Result<Self::Output, Self::Error> {
-        op.super_fold_with(self).map(Into::into)
-    }
-
-    fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
-        op.super_fold_with(self).map(Into::into)
-    }
-
-    fn fold_let(&mut self, l: ILet<ALL>) -> Result<Self::Output, Self::Error> {
-        l.super_fold_with(self).map(Into::into)
-    }
-
-    fn fold_match(&mut self, m: IMatch<ALL>) -> Result<Self::Output, Self::Error> {
-        m.super_fold_with(self).map(Into::into)
-    }
-
-    fn fold_quantifier(
-        &mut self,
-        quantifier: IQuantifier<ALL>,
-    ) -> Result<Self::Output, Self::Error> {
-        quantifier.super_fold_with(self).map(Into::into)
-    }
 }
 
 impl ADTFlattener {
@@ -222,5 +148,59 @@ impl ADTFlattener {
             .into_iter()
             .filter(|cmd| !matches!(cmd, IRCommand::DeclareDatatypes { .. }))
             .collect()
+    }
+}
+
+impl Folder<ALL> for ADTFlattener {
+    type Output = Term;
+    type Error = ();
+
+    fn fold_uninterpreted_func(&mut self, uf: IUF<ALL>) -> Result<Self::Output, Self::Error> {
+        let args = &uf.as_ref().args;
+        if args.len() == 1 {
+            if let Term::Variable(var) = &args[0] {
+                let sort = self.var_sort(var);
+                if let Some(dt) = self.datatypes.get(sort.sym()) {
+                    let dt_info = dt.get(&uf.as_ref().func);
+                    assert!(dt_info.is_some());
+                    let new_name =
+                        ISymbol::from(format!("{}_{}", dt_info.unwrap().0, var_symbol(var)));
+                    return Ok(Term::from(IVar::from(QualIdentifier::from(new_name))));
+                }
+            }
+        }
+
+        uf.super_fold_with(self).map(Into::into)
+    }
+
+    fn fold_const(&mut self, constant: IConst) -> Result<Self::Output, Self::Error> {
+        Ok(constant.into())
+    }
+
+    fn fold_var(&mut self, var: IVar<QualIdentifier>) -> Result<Self::Output, Self::Error> {
+        Ok(var.into())
+    }
+
+    fn fold_core_op(&mut self, op: ICoreOp<ALL>) -> Result<Self::Output, Self::Error> {
+        op.super_fold_with(self).map(Into::into)
+    }
+
+    fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
+        op.super_fold_with(self).map(Into::into)
+    }
+
+    fn fold_let(&mut self, l: ILet<ALL>) -> Result<Self::Output, Self::Error> {
+        l.super_fold_with(self).map(Into::into)
+    }
+
+    fn fold_match(&mut self, m: IMatch<ALL>) -> Result<Self::Output, Self::Error> {
+        m.super_fold_with(self).map(Into::into)
+    }
+
+    fn fold_quantifier(
+        &mut self,
+        quantifier: IQuantifier<ALL>,
+    ) -> Result<Self::Output, Self::Error> {
+        quantifier.super_fold_with(self).map(Into::into)
     }
 }

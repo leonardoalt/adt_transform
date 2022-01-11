@@ -3,8 +3,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use adt_transform::transform::*;
-use adt_transform::*;
+use adt_transform::transform;
+use adt_transform::parser;
 
 use std::{env, fs, io};
 
@@ -21,9 +21,9 @@ fn main() {
     }
     let file = file.expect("Error reading input file: did you accidentally include the file extension, or try to read a file without extension smtlib or smt2?");
     let reader = io::BufReader::new(file);
-    let problem = transform::parse(reader).unwrap();
+    let problem = parser::parse(reader).unwrap();
 
-    let problem = ADTFlattener::default().flatten(problem);
+    let problem = transform::ADTFlattener::default().flatten(problem);
     println!("; Auto-generated flattened instance without ADTs.");
     println!("{}", problem.to_string());
 }
