@@ -41,34 +41,6 @@ impl ADTFlattener {
         })
     }
 
-    fn flatten_declare_fun(&mut self, declare_fun: IRCommand<Term>) -> IRCommand<Term> {
-        match declare_fun {
-            DeclareFun {
-                symbol,
-                parameters,
-                sort,
-            } => DeclareFun {
-                symbol,
-                parameters: parameters
-                    .into_iter()
-                    .map(|sort| self.flatten_sort(sort))
-                    .flatten()
-                    .collect(),
-                sort,
-            },
-            _ => declare_fun,
-        }
-    }
-
-    fn flatten_all_declare_fun(&mut self, commands: Script<Term>) -> Script<Term> {
-        Script::from_commands(
-            commands
-                .into_iter()
-                .map(|cmd| self.flatten_declare_fun(cmd))
-                .collect(),
-        )
-    }
-
     fn var_sort(&self, var: &IVar<QualIdentifier>) -> ISort {
         self.var_sorts.get(&var_symbol(var)).unwrap().clone()
     }
@@ -190,6 +162,35 @@ impl ADTFlattener {
             .filter(|cmd| !matches!(cmd, IRCommand::DeclareDatatypes { .. }))
             .collect()
     }
+
+    fn flatten_declare_fun(&mut self, declare_fun: IRCommand<Term>) -> IRCommand<Term> {
+        match declare_fun {
+            DeclareFun {
+                symbol,
+                parameters,
+                sort,
+            } => DeclareFun {
+                symbol,
+                parameters: parameters
+                    .into_iter()
+                    .map(|sort| self.flatten_sort(sort))
+                    .flatten()
+                    .collect(),
+                sort,
+            },
+            _ => declare_fun,
+        }
+    }
+
+    fn flatten_all_declare_fun(&mut self, commands: Script<Term>) -> Script<Term> {
+        Script::from_commands(
+            commands
+                .into_iter()
+                .map(|cmd| self.flatten_declare_fun(cmd))
+                .collect(),
+        )
+    }
+
 }
 
 impl Folder<ALL> for ADTFlattener {
