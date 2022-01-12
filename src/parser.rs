@@ -17,13 +17,9 @@ pub fn parse_from_string(content: &str) -> Result<Script<Term>, ParseError<ALL>>
 }
 
 pub fn parse_from_file(filename: String) -> Result<Script<Term>, ParseError<ALL>> {
-    let mut file_ext = ".smtlib";
-    let mut file = fs::File::open(filename.clone() + file_ext);
-    if file.is_err() {
-        file_ext = ".smt2";
-        file = fs::File::open(filename + file_ext);
-    }
-    let file = file.expect("Error reading input file: did you accidentally include the file extension, or try to read a file without extension smtlib or smt2?");
+    let file = fs::File::open(filename);
+    let file =
+        file.expect("Error reading input file: did you try to read a file without extension smt2?");
     let reader = io::BufReader::new(file);
 
     parse(reader)

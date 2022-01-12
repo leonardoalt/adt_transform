@@ -2,33 +2,56 @@ pub mod helpers;
 pub mod parser;
 pub mod transform;
 
+use std::{fs, fs::File, path::Path};
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn smoke() {
-        assert_eq!(2 + 2, 4);
+    fn test_transform_dir_no_update() {
+        test_transform_dir(false);
     }
 
     #[test]
-    fn declare_const() {
-        let smt1 = "(declare-datatypes ((my_tuple 0)) (((my_tuple (member1 (Array Int Int)) (member2 Int) ))))
-(declare-const t1 my_tuple)";
-        let smt2 = "(declare-const t1_my_tuple_member1 (Array Int Int))
-(declare-const t1_my_tuple_member2 Int)
-";
-        assert_eq!(
-            run_transform(smt1),
-            smt2
-        );
+    #[ignore]
+    fn test_transform_dir_update() {
+        test_transform_dir(true);
     }
 
-    fn run_transform(content: &str) -> String {
-        transform::ADTFlattener::default()
-            .flatten(
-                parser::parse_from_string(content).unwrap()
-            )
-            .to_string()
+    fn test_transform_dir(update: bool) {
+        let dir = Path::new("./test");
+        assert!(dir.is_dir());
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().unwrap() == "smt2" {
+                let expectation = path.clone().with_extension("expectation");
+                if !Path::new(&expectation).exists() {
+                    assert!(File::create(&expectation).is_ok());
+                }
+                test_transform(
+                    path.to_str().unwrap(),
+                    expectation.to_str().unwrap(),
+                    update,
+                );
+            }
+        }
+    }
+
+    fn test_transform(test_file: &str, expect_file: &str, update: bool) {
+        assert!(Path::new(&test_file).exists());
+        assert!(Path::new(&expect_file).exists());
+        let transformed = transform::ADTFlattener::default()
+            .flatten(parser::parse_from_file(test_file.to_string()).unwrap())
+            .to_string();
+        let expected = fs::read_to_string(expect_file).expect("I need to read this file.");
+        if transformed != expected {
+            if update {
+                assert!(fs::write(expect_file, transformed).is_ok());
+            } else {
+                assert!(false);
+            }
+        }
     }
 }
