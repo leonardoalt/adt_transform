@@ -2,11 +2,10 @@ pub mod helpers;
 pub mod parser;
 pub mod transform;
 
-use std::{fs, fs::File, path::Path};
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, fs::File, path::Path};
 
     #[test]
     fn test_transform_dir_no_update() {
