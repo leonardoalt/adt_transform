@@ -1,0 +1,2 @@
+(declare-fun f (Int (Array Int Int) Int Int) Bool)
+(check-sat)
