@@ -41,6 +41,7 @@ mod tests {
     fn test_transform(test_file: &str, expect_file: &str, update: bool) {
         assert!(Path::new(&test_file).exists());
         assert!(Path::new(&expect_file).exists());
+        println!("Testing file {}...", test_file);
         let transformed = transform::ADTFlattener::default()
             .flatten(parser::parse_from_file(test_file.to_string()).unwrap())
             .to_string();
@@ -49,6 +50,7 @@ mod tests {
             if update {
                 assert!(fs::write(expect_file, transformed).is_ok());
             } else {
+                println!("Expected:\n{}\nGot:\n{}", expected, transformed);
                 assert!(false);
             }
         }

@@ -12,6 +12,7 @@ use smt2parser::concrete::Command::{DeclareConst, DeclareFun};
 
 use num_traits::identities::Zero;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 type Term = IRTerm<ALL>;
 type Command = IRCommand<Term>;
@@ -20,6 +21,8 @@ type Command = IRCommand<Term>;
 pub struct ADTFlattener {
     // datatype_sort -> (member name, template name, member sort)
     datatypes: HashMap<ISymbol, Vec<(ISymbol, ISymbol, ISort)>>,
+    accessors: HashSet<ISymbol>,
+
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
 
@@ -28,7 +31,7 @@ pub struct ADTFlattener {
     // variable (name, sort) -> [(name, sort)]
     var_new_names_cache: HashMap<(ISymbol, ISort), Vec<(ISymbol, ISort)>>,
     // sort -> [sort]
-    sort_cache: HashMap<ISort, Vec<ISort>>
+    sort_cache: HashMap<ISort, Vec<ISort>>,
 }
 
 impl ADTFlattener {
@@ -50,6 +53,10 @@ impl ADTFlattener {
 
     fn var_sort(&self, var: &IVar<QualIdentifier>) -> ISort {
         self.var_sorts.get(&var_symbol(var)).unwrap().clone()
+    }
+
+    fn has_datatype_sort(&self, var: &IVar<QualIdentifier>) -> bool {
+        self.datatypes.contains_key(self.var_sort(var).sym())
     }
 
     fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
@@ -83,6 +90,13 @@ impl ADTFlattener {
                             })
                             .collect();
                         self.datatypes.insert(symbol.clone(), members);
+                        self.datatypes
+                            .get(symbol)
+                            .unwrap()
+                            .iter()
+                            .for_each(|(member, _, _)| {
+                                self.accessors.insert(member.clone());
+                            });
                     })
             }
         });
@@ -97,21 +111,19 @@ impl ADTFlattener {
     }
 
     fn collect_quant_vars(&mut self, assertion: &Term) {
-        match assertion {
-            Quantifier(ref quantifier) => match quantifier.as_ref() {
-                Forall(vars, ..) | Exists(vars, ..) => vars
-                    .iter()
-                    .for_each(|(symbol, sort)| {
-                        self.var_sorts.insert(symbol.clone(), sort.clone());
-                    })
-            },
-            _ => {}
+        if let Quantifier(ref quantifier) = assertion {
+            match quantifier.as_ref() {
+                Forall(vars, ..) | Exists(vars, ..) => vars.iter().for_each(|(symbol, sort)| {
+                    self.var_sorts.insert(symbol.clone(), sort.clone());
+                }),
+            }
         };
     }
 
     fn flatten_sort(&mut self, sort: ISort) -> Vec<ISort> {
         if !self.sort_cache.contains_key(&sort) {
-            self.sort_cache.insert(sort.clone(), self.flatten_sort_nocache(sort.clone()));
+            self.sort_cache
+                .insert(sort.clone(), self.flatten_sort_nocache(sort.clone()));
         }
         self.sort_cache.get(&sort).unwrap().to_vec()
     }
@@ -129,12 +141,14 @@ impl ADTFlattener {
 
     fn flatten_var_decl(&mut self, var: (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
         if !self.var_new_names_cache.contains_key(&var) {
-            self.var_new_names_cache.insert(
-                var.clone(),
-                self.flatten_var_decl_nocache(var.clone())
-            );
+            self.var_new_names_cache
+                .insert(var.clone(), self.flatten_var_decl_nocache(var.clone()));
         }
-        self.var_new_names_cache.get(&var).unwrap().to_vec()
+        let new_vars = self.var_new_names_cache.get(&var).unwrap();
+        new_vars.iter().for_each(|(symbol, sort)| {
+            self.var_sorts.insert(symbol.clone(), sort.clone());
+        });
+        new_vars.to_vec()
     }
 
     fn flatten_var_decl_nocache(&self, (name, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
@@ -238,6 +252,14 @@ impl ADTFlattener {
                 .collect(),
         )
     }
+
+    fn flatten_accessor(&self, accessor: &ISymbol, var: &IVar<QualIdentifier>) -> ISymbol {
+        let sort = self.var_sort(var);
+        let dt = self.datatypes.get(sort.sym()).unwrap();
+        let dt_info = dt.iter().find(|(name, _, _)| name == accessor);
+        assert!(dt_info.is_some());
+        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1))
+    }
 }
 
 impl Folder<ALL> for ADTFlattener {
@@ -246,19 +268,37 @@ impl Folder<ALL> for ADTFlattener {
 
     fn fold_uninterpreted_func(&mut self, uf: IUF<ALL>) -> Result<Self::Output, Self::Error> {
         let args = &uf.as_ref().args;
-        if args.len() == 1 {
+        let func = &uf.as_ref().func;
+        if self.accessors.contains(func) {
+            assert!(args.len() == 1);
             if let Term::Variable(var) = &args[0] {
-                let sort = self.var_sort(var);
-                if let Some(dt) = self.datatypes.get(sort.sym()) {
-                    let dt_info = dt.iter().find(|(name, _, _)| name == &uf.as_ref().func);
-                    assert!(dt_info.is_some());
-                    let new_name =
-                        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1));
-                    return Ok(Term::from(IVar::from(QualIdentifier::from(new_name))));
-                }
+                return Ok(Term::from(IVar::from(QualIdentifier::from(
+                    self.flatten_accessor(func, var),
+                ))));
             }
+        } else {
+            let mut uf = uf.super_fold_with(self)?;
+            uf.args = (Vec::from(uf.args).into_iter())
+                .map(|arg| match arg {
+                    Term::Variable(ref var) => match self.has_datatype_sort(var) {
+                        true => self
+                            .var_new_names_cache
+                            .get(&(var_symbol(var), self.var_sort(var)))
+                            .unwrap()
+                            .clone()
+                            .into_iter()
+                            .map(|(symbol, _)| symbol.into())
+                            .collect(),
+                        false => vec![arg],
+                    },
+                    _ => vec![arg],
+                })
+                .flatten()
+                .collect();
+            return Ok(uf.into());
         }
 
+        // Currently accessors over terms that are not variables end up here.
         uf.super_fold_with(self).map(Into::into)
     }
 
