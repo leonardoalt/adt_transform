@@ -1,0 +1,7 @@
+(declare-const t1_my_tuple_member1 (Array Int Int))
+(declare-const t1_my_tuple_member2 Int)
+(declare-const n1_my_nested_tuple_nested1_my_tuple_member1 (Array Int Int))
+(declare-const n1_my_nested_tuple_nested1_my_tuple_member2 Int)
+(declare-const n1_my_nested_tuple_nested2 Bool)
+(assert (= n1_my_nested_tuple_nested1_my_tuple_member2 t1_my_tuple_member2))
+(check-sat)

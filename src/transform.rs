@@ -36,11 +36,38 @@ pub struct ADTFlattener {
 
 impl ADTFlattener {
     pub fn flatten(&mut self, commands: Script<Term>) -> Script<Term> {
+        let mut commands = commands;
+
+        let mut current = commands.to_string();
+        loop {
+            self.reset();
+            commands = self.iterate(commands);
+            let new = commands.to_string();
+
+            if current == new {
+                break;
+            }
+
+            current = new;
+        }
+
+        self.remove_declare_datatypes(commands)
+    }
+
+    fn reset(&mut self) {
+        self.datatypes.clear();
+        self.accessors.clear();
+        self.var_sorts.clear();
+
+        self.var_new_names_cache.clear();
+        self.sort_cache.clear();
+    }
+
+    fn iterate(&mut self, commands: Script<Term>) -> Script<Term> {
         self.collect_datatypes(&commands);
 
         self.collect_var_sorts(&commands);
 
-        let commands = self.remove_declare_datatypes(commands);
         let commands = self.flatten_all_declare_const(commands);
         let commands = self.flatten_all_declare_fun(commands);
 
