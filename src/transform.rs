@@ -22,6 +22,13 @@ pub struct ADTFlattener {
     datatypes: HashMap<ISymbol, Vec<(ISymbol, ISymbol, ISort)>>,
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
+
+    // Caches:
+    //
+    // variable (name, sort) -> [(name, sort)]
+    var_new_names_cache: HashMap<(ISymbol, ISort), Vec<(ISymbol, ISort)>>,
+    // sort -> [sort]
+    sort_cache: HashMap<ISort, Vec<ISort>>
 }
 
 impl ADTFlattener {
@@ -102,7 +109,14 @@ impl ADTFlattener {
         };
     }
 
-    fn flatten_sort(&self, sort: ISort) -> Vec<ISort> {
+    fn flatten_sort(&mut self, sort: ISort) -> Vec<ISort> {
+        if !self.sort_cache.contains_key(&sort) {
+            self.sort_cache.insert(sort.clone(), self.flatten_sort_nocache(sort.clone()));
+        }
+        self.sort_cache.get(&sort).unwrap().to_vec()
+    }
+
+    fn flatten_sort_nocache(&self, sort: ISort) -> Vec<ISort> {
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
                 .clone()
@@ -113,7 +127,17 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_var_decl(&self, (name, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
+    fn flatten_var_decl(&mut self, var: (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
+        if !self.var_new_names_cache.contains_key(&var) {
+            self.var_new_names_cache.insert(
+                var.clone(),
+                self.flatten_var_decl_nocache(var.clone())
+            );
+        }
+        self.var_new_names_cache.get(&var).unwrap().to_vec()
+    }
+
+    fn flatten_var_decl_nocache(&self, (name, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
                 .iter()
@@ -128,7 +152,7 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_quant_vars(&self, assertion: Term) -> Term {
+    fn flatten_quant_vars(&mut self, assertion: Term) -> Term {
         // TODO can we clone less stuff here?
         match assertion {
             Quantifier(ref quantifier) => match quantifier.as_ref() {
@@ -157,7 +181,7 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_declare_const(&self, declare_const: IRCommand<Term>) -> Vec<IRCommand<Term>> {
+    fn flatten_declare_const(&mut self, declare_const: IRCommand<Term>) -> Vec<IRCommand<Term>> {
         match declare_const {
             DeclareConst { symbol, sort } => self
                 .flatten_var_decl((symbol, sort))
@@ -168,7 +192,7 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_all_declare_const(&self, commands: Script<Term>) -> Script<Term> {
+    fn flatten_all_declare_const(&mut self, commands: Script<Term>) -> Script<Term> {
         Script::from_commands(
             commands
                 .into_iter()
@@ -187,7 +211,7 @@ impl ADTFlattener {
             .collect()
     }
 
-    fn flatten_declare_fun(&self, declare_fun: IRCommand<Term>) -> IRCommand<Term> {
+    fn flatten_declare_fun(&mut self, declare_fun: IRCommand<Term>) -> IRCommand<Term> {
         match declare_fun {
             DeclareFun {
                 symbol,
@@ -206,7 +230,7 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_all_declare_fun(&self, commands: Script<Term>) -> Script<Term> {
+    fn flatten_all_declare_fun(&mut self, commands: Script<Term>) -> Script<Term> {
         Script::from_commands(
             commands
                 .into_iter()
