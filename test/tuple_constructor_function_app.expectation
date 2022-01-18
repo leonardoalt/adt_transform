@@ -1,0 +1,5 @@
+(declare-const a (Array Int Int))
+(declare-const i Int)
+(declare-fun f ((Array Int Int) Int Int) Bool)
+(assert (f a i 3))
+(check-sat)

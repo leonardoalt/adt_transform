@@ -383,6 +383,10 @@ impl Folder<ALL> for ADTFlattener {
                             .collect(),
                         false => vec![arg],
                     },
+                    Term::UF(ref arg_uf) => match self.datatypes.get(&arg_uf.func) {
+                        Some(_) => Vec::from(arg_uf.args.clone()),
+                        None => vec![arg],
+                    },
                     _ => vec![arg],
                 })
                 .flatten()
