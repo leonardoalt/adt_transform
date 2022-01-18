@@ -1,0 +1,4 @@
+(declare-const a (Array Int Int))
+(declare-const i Int)
+(assert (and (and true (= a a)) (= i i)))
+(check-sat)

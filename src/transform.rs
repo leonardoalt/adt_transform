@@ -1,6 +1,7 @@
 use crate::helpers::*;
 
 use amzn_smt_ir::fold::{Fold, Folder, SuperFold};
+use amzn_smt_ir::CoreOp::*;
 use amzn_smt_ir::Quantifier::Exists;
 use amzn_smt_ir::Quantifier::Forall;
 use amzn_smt_ir::Term::Quantifier;
@@ -95,6 +96,29 @@ impl ADTFlattener {
 
     fn has_datatype_sort(&self, var: &IVar<QualIdentifier>) -> bool {
         self.datatypes.contains_key(self.var_sort(var).sym())
+    }
+
+    fn datatype_sort_var(&self, term: &Term) -> Option<(ISort, IVar)> {
+        match term {
+            Term::Variable(var) => {
+                let sort = self.var_sort(var);
+                match self.datatypes.contains_key(sort.sym()) {
+                    true => Some((sort, var.clone())),
+                    false => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn datatype_constructor_args(&self, term: &Term) -> Option<Vec<Term>> {
+        match term {
+            Term::UF(ref uf) => match self.datatypes.contains_key(&uf.func) {
+                true => Some(Vec::from(uf.args.clone())),
+                false => None,
+            },
+            _ => None,
+        }
     }
 }
 
@@ -369,24 +393,25 @@ impl Folder<ALL> for ADTFlattener {
                 ))));
             }
         } else {
-            // Replace function application over tuple variables.
             let mut uf = uf.super_fold_with(self)?;
             uf.args = (Vec::from(uf.args).into_iter())
                 .map(|arg| match arg {
+                    // Replace function application over tuple variables.
                     Term::Variable(ref var) => match self.has_datatype_sort(var) {
                         true => self
-                            .current_var_name_cache_get(&var_symbol(var))
-                            .unwrap()
-                            .clone()
+                            .flatten_var_name(var_symbol(var))
                             .into_iter()
                             .map(|arg| arg.into())
                             .collect(),
                         false => vec![arg],
                     },
-                    Term::UF(ref arg_uf) => match self.datatypes.get(&arg_uf.func) {
-                        Some(_) => Vec::from(arg_uf.args.clone()),
-                        None => vec![arg],
-                    },
+                    // Replace tuple constructor inside function application.
+                    Term::UF(ref arg_uf) => {
+                        match self.datatype_constructor_args(&Term::from(arg_uf)) {
+                            Some(args) => args,
+                            None => vec![arg],
+                        }
+                    }
                     _ => vec![arg],
                 })
                 .flatten()
@@ -398,16 +423,62 @@ impl Folder<ALL> for ADTFlattener {
         uf.super_fold_with(self).map(Into::into)
     }
 
+    fn fold_core_op(&mut self, op: ICoreOp<ALL>) -> Result<Self::Output, Self::Error> {
+        let op = op.super_fold_with(self)?;
+        match op {
+            // Replace tuple constructor inside equality.
+            // TODO organize this better.
+            Eq(ref args) => {
+                let new_args: Vec<Option<Vec<Term>>> = args
+                    .iter()
+                    .map(|arg| {
+                        if let Some(args) = self.datatype_constructor_args(arg) {
+                            Some(args)
+                        } else if let Some((_, var)) = self.datatype_sort_var(arg) {
+                            Some(
+                                self.flatten_var_name(var_symbol(&var))
+                                    .into_iter()
+                                    .map(|arg| Term::Variable(arg.into()))
+                                    .collect(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                // from SmallVec
+                assert!(new_args.len() == 2);
+
+                if new_args[0].is_none() || new_args[1].is_none() {
+                    return Ok(op.into());
+                }
+
+                let left = new_args[0].as_ref().unwrap();
+                let right = new_args[1].as_ref().unwrap();
+                assert_eq!(left.len(), right.len());
+
+                let conj: Term = left
+                    .clone()
+                    .into_iter()
+                    .zip(right.clone().into_iter())
+                    .map(|(a, b)| Eq([a, b].into()).into())
+                    .collect::<Vec<Term>>()
+                    .into_iter()
+                    .fold(Term::from(true), |acc, eq| And([acc, eq].into()).into());
+
+                Ok(conj)
+            }
+            _ => Ok(op.into()),
+        }
+    }
+
     fn fold_const(&mut self, constant: IConst) -> Result<Self::Output, Self::Error> {
         Ok(constant.into())
     }
 
     fn fold_var(&mut self, var: IVar<QualIdentifier>) -> Result<Self::Output, Self::Error> {
         Ok(var.into())
-    }
-
-    fn fold_core_op(&mut self, op: ICoreOp<ALL>) -> Result<Self::Output, Self::Error> {
-        op.super_fold_with(self).map(Into::into)
     }
 
     fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
