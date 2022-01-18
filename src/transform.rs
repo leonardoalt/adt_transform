@@ -28,12 +28,15 @@ pub struct ADTFlattener {
 
     // Caches:
     //
-    // variable (name, sort) -> [(name, sort)]
-    var_new_names_cache: HashMap<(ISymbol, ISort), Vec<(ISymbol, ISort)>>,
+    // scope -> variable name -> [name]
+    // this is separated by scopes because a variable can have the same
+    // name but different sorts in different quantifiers.
+    var_names_cache: Vec<HashMap<ISymbol, Vec<ISymbol>>>,
     // sort -> [sort]
     sort_cache: HashMap<ISort, Vec<ISort>>,
 }
 
+// Main functions.
 impl ADTFlattener {
     pub fn flatten(&mut self, commands: Script<Term>) -> Script<Term> {
         let mut commands = commands;
@@ -59,14 +62,15 @@ impl ADTFlattener {
         self.accessors.clear();
         self.var_sorts.clear();
 
-        self.var_new_names_cache.clear();
+        self.var_names_cache.clear();
+        self.var_names_cache.push(HashMap::default());
         self.sort_cache.clear();
     }
 
     fn iterate(&mut self, commands: Script<Term>) -> Script<Term> {
         self.collect_datatypes(&commands);
 
-        self.collect_var_sorts(&commands);
+        self.collect_global_var_sorts(&commands);
 
         let commands = self.flatten_all_declare_const(commands);
         let commands = self.flatten_all_declare_fun(commands);
@@ -77,24 +81,55 @@ impl ADTFlattener {
             _ => cmd,
         })
     }
+}
+
+// View helper functions.
+impl ADTFlattener {
+    fn var_sort_from_symbol(&self, symbol: &ISymbol) -> ISort {
+        self.var_sorts.get(symbol).unwrap().clone()
+    }
 
     fn var_sort(&self, var: &IVar<QualIdentifier>) -> ISort {
-        self.var_sorts.get(&var_symbol(var)).unwrap().clone()
+        self.var_sort_from_symbol(&var_symbol(var))
     }
 
     fn has_datatype_sort(&self, var: &IVar<QualIdentifier>) -> bool {
         self.datatypes.contains_key(self.var_sort(var).sym())
     }
+}
 
-    fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
-        self.collect_quant_vars(&assertion);
+// Mutating helper functions.
+impl ADTFlattener {
+    fn declare_var(&mut self, (symbol, sort): (ISymbol, ISort)) {
+        self.var_sorts.insert(symbol, sort);
+    }
+}
 
-        let assertion = self.flatten_quant_vars(assertion);
-
-        let t = assertion.fold_with(self);
-        IRCommand::Assert { term: t.unwrap() }
+// Cache scope wrapping stuff.
+impl ADTFlattener {
+    fn current_var_name_cache_contains(&self, symbol: &ISymbol) -> bool {
+        self.var_names_cache.last().unwrap().contains_key(symbol)
     }
 
+    fn current_var_name_cache_get(&self, symbol: &ISymbol) -> Option<&Vec<ISymbol>> {
+        self.var_names_cache.last().unwrap().get(symbol)
+    }
+
+    fn current_var_name_cache_insert(&mut self, symbol: ISymbol, symbols: Vec<ISymbol>) {
+        let mut current = self.var_names_cache.pop().unwrap();
+        current.insert(symbol, symbols);
+        self.var_names_cache.push(current);
+    }
+}
+
+// Collected info.
+impl ADTFlattener {
+    // Collects
+    // - all the declared datatypes
+    // - each datatype's members
+    // - creates template sort names for each pair (dt, member)
+    // TODO maybe we should remove the template name from here
+    // to keep it separated.
     fn collect_datatypes(&mut self, commands: &Script<Term>) {
         commands.as_ref().iter().for_each(|c| {
             if let Command::DeclareDatatypes { datatypes } = c {
@@ -129,7 +164,7 @@ impl ADTFlattener {
         });
     }
 
-    fn collect_var_sorts(&mut self, commands: &Script<Term>) {
+    fn collect_global_var_sorts(&mut self, commands: &Script<Term>) {
         commands.as_ref().iter().for_each(|c| {
             if let Command::DeclareConst { symbol, sort } = c {
                 self.var_sorts.insert(symbol.clone(), sort.clone());
@@ -146,7 +181,10 @@ impl ADTFlattener {
             }
         };
     }
+}
 
+// Basic flattening helpers.
+impl ADTFlattener {
     fn flatten_sort(&mut self, sort: ISort) -> Vec<ISort> {
         if !self.sort_cache.contains_key(&sort) {
             self.sort_cache
@@ -166,31 +204,60 @@ impl ADTFlattener {
         }
     }
 
-    fn flatten_var_decl(&mut self, var: (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
-        if !self.var_new_names_cache.contains_key(&var) {
-            self.var_new_names_cache
-                .insert(var.clone(), self.flatten_var_decl_nocache(var.clone()));
-        }
-        let new_vars = self.var_new_names_cache.get(&var).unwrap();
-        new_vars.iter().for_each(|(symbol, sort)| {
-            self.var_sorts.insert(symbol.clone(), sort.clone());
-        });
-        new_vars.to_vec()
+    fn flatten_var_decl(&mut self, (symbol, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
+        let names = self.flatten_var_name(symbol);
+        let sorts = self.flatten_sort(sort);
+        assert_eq!(names.len(), sorts.len());
+        let var_decls: Vec<_> = names.into_iter().zip(sorts.into_iter()).collect();
+        var_decls
+            .iter()
+            .for_each(|decl| self.declare_var(decl.clone()));
+        var_decls
     }
 
-    fn flatten_var_decl_nocache(&self, (name, sort): (ISymbol, ISort)) -> Vec<(ISymbol, ISort)> {
+    fn flatten_var_name(&mut self, symbol: ISymbol) -> Vec<ISymbol> {
+        if !self.current_var_name_cache_contains(&symbol) {
+            self.current_var_name_cache_insert(
+                symbol.clone(),
+                self.flatten_var_name_nocache(symbol.clone()),
+            );
+        }
+        self.current_var_name_cache_get(&symbol).unwrap().to_vec()
+    }
+
+    fn flatten_var_name_nocache(&self, symbol: ISymbol) -> Vec<ISymbol> {
+        let sort = self.var_sort_from_symbol(&symbol);
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
                 .iter()
-                .map(|(_, template_name, sort)| {
-                    (
-                        ISymbol::from(format!("{}_{}", name, template_name)),
-                        sort.clone(),
-                    )
-                })
-                .collect::<Vec<(ISymbol, ISort)>>(),
-            None => vec![(name, sort)],
+                .map(|(_, template_name, _)| ISymbol::from(format!("{}_{}", symbol, template_name)))
+                .collect(),
+            None => vec![symbol],
         }
+    }
+
+    fn flatten_accessor(&self, accessor: &ISymbol, var: &IVar<QualIdentifier>) -> ISymbol {
+        let sort = self.var_sort(var);
+        let dt = self.datatypes.get(sort.sym()).unwrap();
+        let dt_info = dt.iter().find(|(name, _, _)| name == accessor);
+        assert!(dt_info.is_some());
+        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1))
+    }
+}
+
+// Top level commands flatteners.
+impl ADTFlattener {
+    fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
+        self.var_names_cache
+            .push(self.var_names_cache.last().unwrap().clone());
+        self.collect_quant_vars(&assertion);
+
+        let assertion = self.flatten_quant_vars(assertion);
+
+        let t = assertion.fold_with(self);
+        self.var_names_cache.pop();
+
+        IRCommand::Assert { term: t.unwrap() }
     }
 
     fn flatten_quant_vars(&mut self, assertion: Term) -> Term {
@@ -279,16 +346,13 @@ impl ADTFlattener {
                 .collect(),
         )
     }
-
-    fn flatten_accessor(&self, accessor: &ISymbol, var: &IVar<QualIdentifier>) -> ISymbol {
-        let sort = self.var_sort(var);
-        let dt = self.datatypes.get(sort.sym()).unwrap();
-        let dt_info = dt.iter().find(|(name, _, _)| name == accessor);
-        assert!(dt_info.is_some());
-        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1))
-    }
 }
 
+// Used to flatten and replace:
+// - Accessor function applications over tuple variables.
+// - Function applications over tuple variables.
+// - Function applications over tuple constructors.
+// - Equalities over tuple constructors.
 impl Folder<ALL> for ADTFlattener {
     type Output = Term;
     type Error = ();
@@ -297,6 +361,7 @@ impl Folder<ALL> for ADTFlattener {
         let args = &uf.as_ref().args;
         let func = &uf.as_ref().func;
         if self.accessors.contains(func) {
+            // Replace accessor over tuple variable.
             assert!(args.len() == 1);
             if let Term::Variable(var) = &args[0] {
                 return Ok(Term::from(IVar::from(QualIdentifier::from(
@@ -304,17 +369,17 @@ impl Folder<ALL> for ADTFlattener {
                 ))));
             }
         } else {
+            // Replace function application over tuple variables.
             let mut uf = uf.super_fold_with(self)?;
             uf.args = (Vec::from(uf.args).into_iter())
                 .map(|arg| match arg {
                     Term::Variable(ref var) => match self.has_datatype_sort(var) {
                         true => self
-                            .var_new_names_cache
-                            .get(&(var_symbol(var), self.var_sort(var)))
+                            .current_var_name_cache_get(&var_symbol(var))
                             .unwrap()
                             .clone()
                             .into_iter()
-                            .map(|(symbol, _)| symbol.into())
+                            .map(|arg| arg.into())
                             .collect(),
                         false => vec![arg],
                     },
