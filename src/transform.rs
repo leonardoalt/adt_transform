@@ -1,4 +1,5 @@
 use crate::helpers::*;
+use crate::parser;
 
 use amzn_smt_ir::fold::{Fold, Folder, SuperFold};
 use amzn_smt_ir::CoreOp::*;
@@ -55,7 +56,11 @@ impl ADTFlattener {
             current = new;
         }
 
-        self.remove_declare_datatypes(commands)
+        commands = self.remove_declare_datatypes(commands);
+
+        assert!(parser::parse_from_string(&commands.to_string()).is_ok());
+
+        commands
     }
 
     fn reset(&mut self) {
