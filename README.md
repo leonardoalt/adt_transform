@@ -2,7 +2,7 @@ SMT ADT Remover
 ===============
 
 This tool aims at removing ADTs from smtlib2 instances that only use the Tuples
-subset of ADTs.
+subset of ADTs. Not all syntax is supported, check the Unsupported section below.
 
 Flattening
 ----------
