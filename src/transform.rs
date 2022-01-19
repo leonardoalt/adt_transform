@@ -12,14 +12,16 @@ use amzn_smt_ir::{IOp, ISort, ISymbol, IVar, QualIdentifier};
 
 use smt2parser::concrete::Command::{DeclareConst, DeclareFun};
 
+use atomic_counter::{AtomicCounter, ConsistentCounter};
 use num_traits::identities::Zero;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 type Term = IRTerm<ALL>;
 type Command = IRCommand<Term>;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Debug)]
 pub struct ADTFlattener {
     // datatype_sort -> (member name, template name, member sort)
     datatypes: HashMap<ISymbol, Vec<(ISymbol, ISymbol, ISort)>>,
@@ -36,6 +38,9 @@ pub struct ADTFlattener {
     var_names_cache: Vec<HashMap<ISymbol, Vec<ISymbol>>>,
     // sort -> [sort]
     sort_cache: HashMap<ISort, Vec<ISort>>,
+
+    // Unique id generator.
+    counter: ConsistentCounter,
 }
 
 // Main functions.
@@ -71,6 +76,8 @@ impl ADTFlattener {
         self.var_names_cache.clear();
         self.var_names_cache.push(HashMap::default());
         self.sort_cache.clear();
+
+        self.counter.reset();
     }
 
     fn iterate(&mut self, commands: Script<Term>) -> Script<Term> {
@@ -175,7 +182,12 @@ impl ADTFlattener {
                             .map(|(member, sort)| {
                                 (
                                     member.clone(),
-                                    ISymbol::from(format!("{}_{}", symbol, member)),
+                                    ISymbol::from(format!(
+                                        "{}_{}_{}",
+                                        symbol,
+                                        member,
+                                        self.counter.inc()
+                                    )),
                                     sort,
                                 )
                             })

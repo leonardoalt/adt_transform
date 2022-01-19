@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 amzn-smt-ir = { path = "../rust-smt-ir/amzn-smt-ir", version = "0.1" }
 amzn-smt-ir-derive = { path = "../rust-smt-ir/amzn-smt-ir-derive", version = "0.1" }
+atomic-counter = "1.0.1"
 smt2parser = "0.6.1"
 num-traits = "0.2"

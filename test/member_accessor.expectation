@@ -1,4 +1,4 @@
-(declare-const t1_my_tuple_member1 (Array Int Int))
-(declare-const t1_my_tuple_member2 Int)
-(assert (> t1_my_tuple_member2 (select t1_my_tuple_member1 5)))
+(declare-const t1_my_tuple_member1_0 (Array Int Int))
+(declare-const t1_my_tuple_member2_1 Int)
+(assert (> t1_my_tuple_member2_1 (select t1_my_tuple_member1_0 5)))
 (check-sat)
