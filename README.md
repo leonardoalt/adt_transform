@@ -100,6 +100,8 @@ tuples left.
 Unsupported Syntax
 ------------------
 
+- Tuples with more than one constructor.
+- Tuples whose constructor's name is different from the tuple's name.
 - Accessor functions must be applied to a variable of a tuple sort or another
   accessor function (in case of nested tuples). If they are applied over
   another function application or tuple constructor, neither will be flattened.
