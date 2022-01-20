@@ -286,6 +286,67 @@ impl ADTFlattener {
     }
 }
 
+struct ArraySortData {
+    index: Box<BetterSort>,
+    element: Box<BetterSort>
+}
+
+struct TupleSortData {
+    members: Vec<Box<BetterSort>>
+}
+
+enum BetterSort {
+    Bool,
+    Int,
+    ArraySort(ArraySortData),
+    TupleSort(TupleSortData)
+}
+
+impl BetterSort {
+    fn as_array_sort(self) -> Option<ArraySortData> {
+        match self {
+            BetterSort::ArraySort(data) => Some(data),
+            _ => None
+        }
+    }
+
+    fn from(sort: &ISort) -> Option<BetterSort> {
+        match sort.as_ref() {
+            Sort::Simple { identifier } => match identifier_symbol(identifier).to_string().as_str() {
+                "Bool" => Some(BetterSort::Bool),
+                "Int" => Some(BetterSort::Int),
+                _ => None
+            },
+            Sort::Parameterized {
+                identifier,
+                parameters,
+            } if identifier_symbol(identifier) == "Array".into() && parameters.len() == 2 => {
+                match (BetterSort::from(&parameters[0]), BetterSort::from(&parameters[1])) {
+                    (Some(a), Some(b)) => Some(BetterSort::ArraySort(ArraySortData {
+                        index: Box::new(a),
+                        element: Box::new(b)
+                    })),
+                    _ => None
+                }
+            },
+            Sort::Parameterized {
+                identifier,
+                parameters,
+            } 
+                match (BetterSort::from(&parameters[0]), BetterSort::from(&parameters[1])) {
+                    (Some(a), Some(b)) => Some(BetterSort::ArraySort(ArraySortData {
+                        index: Box::new(a),
+                        element: Box::new(b)
+                    })),
+                    _ => None
+                }
+            }
+
+            _ => None,
+        }
+    }
+}
+
 // Top level commands flatteners.
 impl ADTFlattener {
     fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
