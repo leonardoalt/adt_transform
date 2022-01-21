@@ -111,4 +111,29 @@ Unsupported Syntax
 Tuples as Index Sort of Arrays
 ------------------------------
 
-TODO
+Flattening tuples that are used as indices of arrays is more complicated.
+If we have a tuple `T: (T1, T2)` and an array `A: (Array T Int)`, we need
+two arrays:
+
+- `A2: (Array T2 Int)`
+- `A1: (Array T1 (Array T2 Int))`
+
+so that `A` is replaced by `A1`.
+
+Let `a` be of sort `A` and `t` of sort `T`.
+
+- `(select a t)` ->
+
+Variable `t` is transformed into `t_1` and `t_2`.
+
+Now we have `a1` of sort `A1`, `t_1` of sort `T1` and `t_2` of sort `T2`.
+
+The resulting select is:
+`(select (select a1 t1) t2)`
+
+- `(select a (T x y))` -> `(select (select a1 x) y)`
+
+- `(store a t v)` -> `(store a1 t1 (store (select a1 t1) t2 v))`
+That is, `select` until the last tuple member (not included) to retrieve the
+innermost array; store the value in the innermost array; store the resulting
+array in decreasing index order of tuple member.

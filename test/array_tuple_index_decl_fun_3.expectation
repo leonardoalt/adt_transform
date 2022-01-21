@@ -1,0 +1,2 @@
+(set-logic HORN)
+(declare-fun f (Int (Array (Array Int (Array Int (Array Int (Array Int Int)))) (Array (Array (Array Int Int) (Array Int Int)) (Array (Array (Array Int Int) (Array Int Int)) (Array (Array (Array Int Int) (Array Int Int)) Real)))) Int) Bool)

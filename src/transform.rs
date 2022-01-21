@@ -5,6 +5,7 @@ use amzn_smt_ir::fold::{Fold, Folder, SuperFold};
 use amzn_smt_ir::CoreOp::*;
 use amzn_smt_ir::Quantifier::Exists;
 use amzn_smt_ir::Quantifier::Forall;
+use amzn_smt_ir::Sort;
 use amzn_smt_ir::Term::Quantifier;
 use amzn_smt_ir::{logic::*, Command as IRCommand, Script, Term as IRTerm};
 use amzn_smt_ir::{IConst, ICoreOp, ILet, IMatch, IQuantifier, IUF};
@@ -30,6 +31,9 @@ pub struct ADTFlattener {
     // variable name -> sort
     var_sorts: HashMap<ISymbol, ISort>,
 
+    // array of tuple index type -> nested array of array index type
+    array_tuples: HashMap<ISort, ISort>,
+
     // Caches:
     //
     // scope -> variable name -> [name]
@@ -46,6 +50,10 @@ pub struct ADTFlattener {
 // Main functions.
 impl ADTFlattener {
     pub fn flatten(&mut self, commands: Script<Term>) -> Script<Term> {
+        self.full_pass(commands)
+    }
+
+    fn full_pass(&mut self, commands: Script<Term>) -> Script<Term> {
         let mut commands = commands;
 
         let mut current = commands.to_string();
@@ -69,21 +77,15 @@ impl ADTFlattener {
     }
 
     fn reset(&mut self) {
-        self.datatypes.clear();
-        self.accessors.clear();
         self.var_sorts.clear();
-
         self.var_names_cache.clear();
         self.var_names_cache.push(HashMap::default());
-        self.sort_cache.clear();
-
-        self.counter.reset();
     }
 
     fn iterate(&mut self, commands: Script<Term>) -> Script<Term> {
         self.collect_datatypes(&commands);
-
         self.collect_global_var_sorts(&commands);
+        self.collect_arrays_tuple_index();
 
         let commands = self.flatten_all_declare_const(commands);
         let commands = self.flatten_all_declare_fun(commands);
@@ -110,6 +112,10 @@ impl ADTFlattener {
         self.datatypes.contains_key(self.var_sort(var).sym())
     }
 
+    fn is_tuple_sort(&self, sort: &ISort) -> bool {
+        self.datatypes.contains_key(sort.sym())
+    }
+
     fn datatype_sort_var(&self, term: &Term) -> Option<(ISort, IVar)> {
         match term {
             Term::Variable(var) => {
@@ -130,6 +136,23 @@ impl ADTFlattener {
                 false => None,
             },
             _ => None,
+        }
+    }
+
+    // TODO rewrite this when we have proper typed sorts
+    fn is_array_tuple_index(&self, sort: &ISort) -> bool {
+        match sort.as_ref() {
+            Sort::Simple { .. } => false,
+            Sort::Parameterized {
+                identifier,
+                parameters,
+            } if identifier_symbol(identifier).to_string().as_str() == "Array"
+                && parameters.len() == 2
+                && self.is_tuple_sort(&parameters[0]) =>
+            {
+                true
+            }
+            _ => false,
         }
     }
 }
@@ -205,6 +228,16 @@ impl ADTFlattener {
         });
     }
 
+    fn collect_arrays_tuple_index(&mut self) {
+        self.array_tuples = self
+            .sort_cache
+            .clone()
+            .into_iter()
+            .filter(|(sort, _)| self.is_array_tuple_index(sort))
+            .map(|(sort, _)| (sort.clone(), self.flatten_array_tuple(sort)))
+            .collect();
+    }
+
     fn collect_global_var_sorts(&mut self, commands: &Script<Term>) {
         commands.as_ref().iter().for_each(|c| {
             if let Command::DeclareConst { symbol, sort } = c {
@@ -236,12 +269,17 @@ impl ADTFlattener {
 
     fn flatten_sort_nocache(&self, sort: ISort) -> Vec<ISort> {
         match self.datatypes.get(sort.sym()) {
+            // Flatten a tuple into its members.
             Some(members) => members
                 .clone()
                 .into_iter()
                 .map(|(_, _, sort)| sort)
                 .collect(),
-            None => vec![sort],
+            None => match self.is_array_tuple_index(&sort) {
+                // Flatten an array that has a tuple as index.
+                true => vec![self.flatten_array_tuple(sort)],
+                false => vec![sort],
+            },
         }
     }
 
@@ -283,6 +321,37 @@ impl ADTFlattener {
         let dt_info = dt.iter().find(|(name, _, _)| name == accessor);
         assert!(dt_info.is_some());
         ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1))
+    }
+
+    fn flatten_array_tuple(&self, sort: ISort) -> ISort {
+        match self.is_array_tuple_index(&sort) {
+            true => match sort.as_ref() {
+                Sort::Parameterized {
+                    identifier,
+                    parameters,
+                } => self
+                    .datatypes
+                    .get(parameters[0].sym())
+                    .unwrap()
+                    .iter()
+                    .map(|(_, _, sort)| sort)
+                    .rev()
+                    .fold(
+                        self.flatten_array_tuple(parameters[1].clone()),
+                        |acc, member_sort| {
+                            Sort::Parameterized {
+                                identifier: identifier.clone(),
+                                parameters: [self.flatten_array_tuple(member_sort.clone()), acc]
+                                    .to_vec(),
+                            }
+                            // TODO can we remove some clones here?
+                            .into()
+                        },
+                    ),
+                _ => unreachable!(),
+            },
+            false => sort,
+        }
     }
 }
 
