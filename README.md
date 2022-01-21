@@ -3,6 +3,7 @@ SMT ADT Remover
 
 This tool aims at removing ADTs from smtlib2 instances that only use the Tuples
 subset of ADTs. Not all syntax is supported, check the Unsupported section below.
+You may also want to check the `test` directory for examples of transformations.
 
 Flattening
 ----------
@@ -97,17 +98,6 @@ shown in 2.2 above.
 4) **Nested tuples** are flattened in consecutive stages until there are no more
 tuples left.
 
-Unsupported Syntax
-------------------
-
-- Tuples with more than one constructor.
-- Tuples whose constructor's name is different from the tuple's name.
-- Accessor functions must be applied to a variable of a tuple sort or another
-  accessor function (in case of nested tuples). If they are applied over
-  another function application or tuple constructor, neither will be flattened.
-- Tuples inside `let` and `match` expressions.
-- Tuples as array index (see below).
-
 Tuples as Index Sort of Arrays
 ------------------------------
 
@@ -137,3 +127,13 @@ The resulting select is:
 That is, `select` until the last tuple member (not included) to retrieve the
 innermost array; store the value in the innermost array; store the resulting
 array in decreasing index order of tuple member.
+
+Unsupported Syntax
+------------------
+
+- Tuples with more than one constructor.
+- Tuples whose constructor's name is different from the tuple's name.
+- Accessor functions must be applied to a variable of a tuple sort or another
+  accessor function (in case of nested tuples). If they are applied over
+  another function application or tuple constructor, neither will be flattened.
+- Tuples inside `let` and `match` expressions.
