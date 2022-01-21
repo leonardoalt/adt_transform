@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use amzn_smt_ir::{IIdentifier, ISymbol, IVar, Identifier, QualIdentifier};
 
 pub fn identifier_symbol(identifier: &IIdentifier) -> ISymbol {

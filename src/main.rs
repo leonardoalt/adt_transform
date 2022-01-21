@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use adt_transform::parser;
 use adt_transform::transform;
 

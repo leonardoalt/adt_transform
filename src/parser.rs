@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use amzn_smt_ir::{logic::*, ParseError, Script, Term as IRTerm};
 
 use std::{fs, io};
