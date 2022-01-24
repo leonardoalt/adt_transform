@@ -312,7 +312,9 @@ impl ADTFlattener {
         match self.datatypes.get(sort.sym()) {
             Some(members) => members
                 .iter()
-                .map(|(_, template_name, _)| ISymbol::from(format!("{}_{}", symbol, template_name)))
+                .map(|(_, template_name, _)| {
+                    ISymbol::from(format!("{}_{}", symbol, template_name).replace("|", ""))
+                })
                 .collect(),
             None => vec![symbol],
         }
@@ -323,7 +325,7 @@ impl ADTFlattener {
         let dt = self.datatypes.get(sort.sym()).unwrap();
         let dt_info = dt.iter().find(|(name, _, _)| name == accessor);
         assert!(dt_info.is_some());
-        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1))
+        ISymbol::from(format!("{}_{}", var_symbol(var), dt_info.unwrap().1).replace("|", ""))
     }
 
     fn flatten_array_tuple(&self, sort: ISort) -> ISort {
