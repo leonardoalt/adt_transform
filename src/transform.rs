@@ -4,6 +4,8 @@ use crate::helpers::*;
 use crate::parser;
 
 use amzn_smt_ir::fold::{Fold, Folder, SuperFold};
+use amzn_smt_ir::logic::all::Op::Array;
+use amzn_smt_ir::logic::ArrayOp;
 use amzn_smt_ir::CoreOp::*;
 use amzn_smt_ir::Quantifier::Exists;
 use amzn_smt_ir::Quantifier::Forall;
@@ -79,7 +81,6 @@ impl ADTFlattener {
     }
 
     fn reset(&mut self) {
-        self.var_sorts.clear();
         self.var_names_cache.clear();
         self.var_names_cache.push(HashMap::default());
     }
@@ -561,16 +562,34 @@ impl Folder<ALL> for ADTFlattener {
         }
     }
 
+    fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
+        let op = op.super_fold_with(self)?;
+        match op {
+            Array(ref array_op) => match array_op {
+                // Identify `select`s where the index
+                // - is a variable.
+                // - has tuple sort.
+                ArrayOp::Select(array, idx) => match is_variable(&idx) {
+                    Some(var) if self.has_datatype_sort(var) => Ok(self
+                        .flatten_var_name(var_symbol(var))
+                        .into_iter()
+                        .fold(array.clone(), |acc, x| {
+                            ArrayOp::Select(acc, x.into()).into()
+                        })),
+                    _ => Ok(op.into()),
+                },
+                _ => Ok(op.into()),
+            },
+            _ => Ok(op.into()),
+        }
+    }
+
     fn fold_const(&mut self, constant: IConst) -> Result<Self::Output, Self::Error> {
         Ok(constant.into())
     }
 
     fn fold_var(&mut self, var: IVar<QualIdentifier>) -> Result<Self::Output, Self::Error> {
         Ok(var.into())
-    }
-
-    fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
-        op.super_fold_with(self).map(Into::into)
     }
 
     fn fold_let(&mut self, l: ILet<ALL>) -> Result<Self::Output, Self::Error> {
