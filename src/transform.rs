@@ -567,19 +567,16 @@ impl Folder<ALL> for ADTFlattener {
     fn fold_theory_op(&mut self, op: IOp<ALL>) -> Result<Self::Output, Self::Error> {
         let op = op.super_fold_with(self)?;
         match op {
-            Array(ref array_op) => match array_op {
-                // Identify `select`s where the index
-                // - is a variable.
-                // - has tuple sort.
-                ArrayOp::Select(array, idx) => match is_variable(&idx) {
-                    Some(var) if self.has_datatype_sort(var) => Ok(self
-                        .flatten_var_name(var_symbol(var))
-                        .into_iter()
-                        .fold(array.clone(), |acc, x| {
-                            ArrayOp::Select(acc, x.into()).into()
-                        })),
-                    _ => Ok(op.into()),
-                },
+            // Identify `select`s where the index
+            // - is a variable.
+            // - has tuple sort.
+            Array(ArrayOp::Select(ref array, ref idx)) => match is_variable(idx) {
+                Some(var) if self.has_datatype_sort(var) => Ok(self
+                    .flatten_var_name(var_symbol(var))
+                    .into_iter()
+                    .fold(array.clone(), |acc, x| {
+                        ArrayOp::Select(acc, x.into()).into()
+                    })),
                 _ => Ok(op.into()),
             },
             _ => Ok(op.into()),
