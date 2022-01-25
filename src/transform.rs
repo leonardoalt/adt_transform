@@ -568,15 +568,23 @@ impl Folder<ALL> for ADTFlattener {
         let op = op.super_fold_with(self)?;
         match op {
             // Identify `select`s where the index
-            // - is a variable.
-            // - has tuple sort.
-            Array(ArrayOp::Select(ref array, ref idx)) => match is_variable(idx) {
-                Some(var) if self.has_datatype_sort(var) => Ok(self
-                    .flatten_var_name(var_symbol(var))
+            // - is a variable and has tuple sort.
+            Array(ArrayOp::Select(ref array, Term::Variable(ref idx)))
+                if self.has_datatype_sort(idx) =>
+            {
+                Ok(self
+                    .flatten_var_name(var_symbol(idx))
                     .into_iter()
                     .fold(array.clone(), |acc, x| {
                         ArrayOp::Select(acc, x.into()).into()
-                    })),
+                    }))
+            }
+            // - is a tuple constructor.
+            Array(ArrayOp::Select(ref array, ref idx)) => match self.datatype_constructor_args(idx)
+            {
+                Some(args) => Ok(args
+                    .into_iter()
+                    .fold(array.clone(), |acc, x| ArrayOp::Select(acc, x).into())),
                 _ => Ok(op.into()),
             },
             _ => Ok(op.into()),
