@@ -1,0 +1,4 @@
+(set-logic HORN)
+(declare-fun f ((Array Int (Array Int bytes_tuple))) Bool)
+(assert (forall ((a (Array Int (Array Int bytes_tuple)))) (f a)))
+(check-sat)
