@@ -2,5 +2,5 @@
 (declare-const i Int)
 (declare-const t_member1_0 (Array Int Int))
 (declare-const t_member2_1 Int)
-(assert (and (= t_member1_0 (store a 2 3)) (= t_member2_1 42) (and (and true (= a t_member1_0)) (= i t_member2_1))))
+(assert (and (= t_member1_0 (store a 2 3)) (= t_member2_1 42) (and (= a t_member1_0) (= i t_member2_1))))
 (check-sat)

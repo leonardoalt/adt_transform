@@ -777,16 +777,16 @@ impl Folder<ALL> for ADTFlattener {
                 let right = new_args[1].as_ref().unwrap();
                 assert_eq!(left.len(), right.len());
 
-                let conj: Term = left
+                let conj: Option<Term> = left
                     .clone()
                     .into_iter()
                     .zip(right.clone().into_iter())
                     .map(|(a, b)| Eq([a, b].into()).into())
                     .collect::<Vec<Term>>()
                     .into_iter()
-                    .fold(Term::from(true), |acc, eq| And([acc, eq].into()).into());
+                    .reduce(|acc, eq| And([acc, eq].into()).into());
 
-                Ok(conj)
+                Ok(conj.unwrap())
             }
             _ => Ok(op.into()),
         }
