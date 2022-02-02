@@ -1,3 +1,3 @@
 (set-logic HORN)
-(assert (forall ((a_bytes_tuple_bytes_tuple_accessor_array_0 (Array Int (Array Int Int))) (a_bytes_tuple_bytes_tuple_accessor_length_1 (Array Int Int))) true))
+(assert (forall ((a_bytes_tuple_accessor_array_0 (Array Int (Array Int Int))) (a_bytes_tuple_accessor_length_1 (Array Int Int))) true))
 (check-sat)

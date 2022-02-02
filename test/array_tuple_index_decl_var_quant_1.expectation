@@ -1,4 +1,4 @@
 (set-logic HORN)
 (declare-fun f (Int (Array Int (Array Int (Array Int (Array Int Int)))) (Array (Array Int Int) (Array Int Int)) (Array (Array Int Int) (Array Int Int)) (Array (Array Int Int) (Array Int Int))) Bool)
-(assert (forall ((x_crypto_type_ecrecover_6 (Array Int (Array Int (Array Int (Array Int Int))))) (x_crypto_type_keccak256_7 (Array (Array Int Int) (Array Int Int))) (x_crypto_type_ripemd160_8 (Array (Array Int Int) (Array Int Int))) (x_crypto_type_sha256_9 (Array (Array Int Int) (Array Int Int)))) (f 2 x_crypto_type_ecrecover_6 x_crypto_type_keccak256_7 x_crypto_type_ripemd160_8 x_crypto_type_sha256_9)))
+(assert (forall ((x_ecrecover_6 (Array Int (Array Int (Array Int (Array Int Int))))) (x_keccak256_7 (Array (Array Int Int) (Array Int Int))) (x_ripemd160_8 (Array (Array Int Int) (Array Int Int))) (x_sha256_9 (Array (Array Int Int) (Array Int Int)))) (f 2 x_ecrecover_6 x_keccak256_7 x_ripemd160_8 x_sha256_9)))
 (check-sat)

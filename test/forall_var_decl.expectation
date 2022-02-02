@@ -1,4 +1,4 @@
-(declare-const t1_my_tuple_member1_0 (Array Int Int))
-(declare-const t1_my_tuple_member2_1 Int)
-(assert (forall ((d Int) (tt_my_tuple_member1_0 (Array Int Int)) (tt_my_tuple_member2_1 Int)) (and (= t1_my_tuple_member1_0 tt_my_tuple_member1_0) (> d tt_my_tuple_member2_1))))
+(declare-const t1_member1_0 (Array Int Int))
+(declare-const t1_member2_1 Int)
+(assert (forall ((d Int) (tt_member1_0 (Array Int Int)) (tt_member2_1 Int)) (and (= t1_member1_0 tt_member1_0) (> d tt_member2_1))))
 (check-sat)

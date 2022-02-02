@@ -20,6 +20,7 @@ use smt2parser::concrete::Command::{DeclareConst, DeclareFun};
 use atomic_counter::{AtomicCounter, ConsistentCounter};
 use num_traits::identities::Zero;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -122,6 +123,23 @@ impl ADTFlattener {
 
     fn is_tuple_sort(&self, sort: &ISort) -> bool {
         self.datatypes.contains_key(sort.sym())
+    }
+
+    fn contains_tuple_sort(&self, sort: &ISort) -> bool {
+        if self.is_tuple_sort(sort) {
+            return true;
+        }
+
+        match sort.as_ref() {
+            Sort::Simple { .. } => false,
+            Sort::Parameterized {
+                identifier: _,
+                parameters,
+            } => parameters
+                .iter()
+                .map(|p| self.contains_tuple_sort(p))
+                .any(|x| x),
+        }
     }
 
     fn datatype_sort_var(&self, term: &Term) -> Option<(ISort, IVar)> {
@@ -229,12 +247,7 @@ impl ADTFlattener {
                             .map(|(member, sort)| {
                                 (
                                     member.clone(),
-                                    ISymbol::from(format!(
-                                        "{}_{}_{}",
-                                        symbol,
-                                        member,
-                                        self.counter.inc()
-                                    )),
+                                    ISymbol::from(format!("{}_{}", member, self.counter.inc())),
                                     sort,
                                 )
                             })
@@ -442,6 +455,20 @@ impl ADTFlattener {
             false => vec![sort],
         }
     }
+
+    fn flatten_select_array_tuple_elem(
+        &mut self,
+        array: &IVar<QualIdentifier>,
+        idx: &Term,
+    ) -> Vec<Term> {
+        // Replace `select` inside fun appl,
+        // where its array has tuple element type,
+        // but its new indexed arrays.
+        self.flatten_var_decl((var_symbol(array), self.var_sort(array)))
+            .into_iter()
+            .map(|(name, _)| ArrayOp::Select(name.into(), idx.clone()).into())
+            .collect()
+    }
 }
 
 // Top level commands flatteners.
@@ -449,30 +476,51 @@ impl ADTFlattener {
     fn flatten_assertion(&mut self, assertion: Term) -> IRCommand<Term> {
         self.var_names_cache
             .push(self.var_names_cache.last().unwrap().clone());
+
         self.collect_quant_vars(&assertion);
 
         let assertion = self.flatten_quant_vars(assertion);
+        //self.flatten_quant_vars(&assertion);
 
-        let t = assertion.fold_with(self);
+        //println!("Var sorts AFTER are {:?}", self.var_sorts);
+        let mut t = assertion.fold_with(self).unwrap();
+
+        if let Quantifier(ref quantifier) = t {
+            if let Forall(ref vars, ref term) = quantifier.as_ref() {
+                let x = BTreeMap::<ISymbol, ISort>::from_iter(vars.clone());
+                //x.extend(self.var_sorts.clone());
+                t = Term::from(Forall(Vec::from_iter(x), term.clone()));
+            }
+        }
+
         self.var_names_cache.pop();
 
-        IRCommand::Assert { term: t.unwrap() }
+        IRCommand::Assert { term: t }
     }
 
     fn flatten_quant_vars(&mut self, assertion: Term) -> Term {
         // TODO can we clone less stuff here?
         match assertion {
             Quantifier(ref quantifier) => match quantifier.as_ref() {
-                Forall(vars, term) => Term::from(Forall(
-                    vars.clone()
-                        .into_iter()
-                        .map(|var| self.flatten_var_decl(var))
-                        .collect::<Vec<Vec<(ISymbol, ISort)>>>()
-                        .into_iter()
-                        .flatten()
-                        .collect(),
-                    term.clone(),
-                )),
+                Forall(vars, term) => {
+                    Term::from(Forall(
+                        vars.clone()
+                            .into_iter()
+                            .map(|var| {
+                                // TODO does this make sense?
+                                let mut v = self.flatten_var_decl(var.clone());
+                                if !self.contains_tuple_sort(&var.1) {
+                                    v.push(var);
+                                }
+                                v
+                            })
+                            .collect::<Vec<Vec<(ISymbol, ISort)>>>()
+                            .into_iter()
+                            .flatten()
+                            .collect(),
+                        term.clone(),
+                    ))
+                }
                 Exists(vars, term) => Term::from(Exists(
                     vars.clone()
                         .into_iter()
@@ -562,10 +610,56 @@ impl Folder<ALL> for ADTFlattener {
         if self.accessors.contains(func) {
             // Replace accessor over tuple variable.
             assert!(args.len() == 1);
-            if let Term::Variable(var) = &args[0] {
-                return Ok(Term::from(IVar::from(QualIdentifier::from(
-                    self.flatten_accessor(func, var),
-                ))));
+            match &args[0] {
+                Term::Variable(var) => {
+                    return Ok(Term::from(IVar::from(QualIdentifier::from(
+                        self.flatten_accessor(func, var),
+                    ))));
+                }
+                Term::OtherOp(ref op) => {
+                    if let Array(ArrayOp::Select(Term::Variable(ref array), ref idx)) = op.as_ref()
+                    {
+                        /*
+                         * if arg is a select:
+                         * element of array must be a tuple
+                         * first resolve the array itself. If the array has tuple element type,
+                         * one select will become multiple selects.
+                         * After that, fold each select so that the indices are resolved into
+                         * nested selects.
+                         * After that, the index of the accessor in the tuple is the index of the
+                         * array that should be used.
+                         */
+                        let selects: Vec<Term> =
+                            match self.is_array_tuple_elem(&self.var_sort(array)) {
+                                true => self.flatten_select_array_tuple_elem(array, idx),
+                                false => vec![op.clone().into()],
+                            };
+                        let nested_selects: Vec<Term> = selects
+                            .into_iter()
+                            .map(|select| select.fold_with(self).unwrap())
+                            .collect();
+                        // TODO improve this search
+                        let pos = self
+                            .datatypes
+                            .iter()
+                            .map(|(_, members)| {
+                                members.iter().position(|(member, _, _)| member == func)
+                            })
+                            .fold(None, |acc, x| match (acc, x) {
+                                (Some(_), Some(_)) => panic!(),
+                                (_, Some(x)) => Some(x),
+                                (Some(acc), _) => Some(acc),
+                                _ => None,
+                            });
+                        // TODO assert that members has same length as
+                        // nested_selects.
+                        assert!(pos.is_some());
+                        let pos = pos.unwrap();
+                        assert!(pos < nested_selects.len());
+                        return Ok(nested_selects[pos].clone());
+                    }
+                }
+                _ => {}
             }
         } else {
             let mut uf = uf.super_fold_with(self)?;
@@ -590,6 +684,16 @@ impl Folder<ALL> for ADTFlattener {
                             None => vec![arg],
                         }
                     },
+                    Term::OtherOp(ref op) => {
+                        match op.as_ref() {
+                            Array(ArrayOp::Select(Term::Variable(ref array), ref idx))
+                                if self.is_array_tuple_elem(&self.var_sort(array)) =>
+                            {
+                                self.flatten_select_array_tuple_elem(array, idx)
+                            }
+                            _ => vec![arg],
+                        }
+                },
                     _ => vec![arg],
                 })
                 .flatten()
@@ -621,6 +725,19 @@ impl Folder<ALL> for ADTFlattener {
                                     .map(|(name, _)| Term::Variable(name.into()))
                                     .collect(),
                             )
+                        } else if let Term::Variable(var) = arg {
+                            //println!("Var {} is not DT has sort {:?}", var_symbol(&var), self.var_sort(&var));
+                            if self.contains_tuple_sort(&self.var_sort(var)) {
+                                //println!("Contains tuple sort");
+                                Some(
+                                    self.flatten_var_decl((var_symbol(var), self.var_sort(var)))
+                                        .into_iter()
+                                        .map(|(name, _)| Term::Variable(name.into()))
+                                        .collect(),
+                                )
+                            } else {
+                                None
+                            }
                         } else if let Term::OtherOp(ref op) = arg {
                             match op.as_ref() {
                                 Array(ArrayOp::Select(Term::Variable(ref array), ref idx))
